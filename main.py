@@ -431,31 +431,24 @@ class SnkrDunkSpider:
         # 读取所有页面文件并汇总
         all_page_files = glob.glob(os.path.join(self.pages_dir, "*.json"))
         
-        consolidated_data = {
-            'summary': {
-                'total_brands': len(brands_data),
-                'total_models': sum(len(brand['models']) for brand in brands_data),
-                'total_page_files': len(all_page_files),
-                'crawl_time': datetime.now().isoformat()
-            },
-            'brands': [],
-            'all_products': []
-        }
-        
+        all_products = []
+        brand_stats = {}
+        model_stats = {}
         total_products = 0
         
         # 处理每个品牌
         for brand in brands_data:
-            brand_summary = {
-                'id': brand['id'],
-                'name': brand['name'],
-                'localized_name': brand['localized_name'],
-                'url': brand['url'],
-                'models': []
-            }
+            brand_id = brand['id']
+            brand_name = brand['name']
+            brand_localized_name = brand['localized_name']
+            brand_product_count = 0
             
             # 处理每个模型
             for model in brand['models']:
+                model_id = model['id']
+                model_name = model['name']
+                model_localized_name = model['localized_name']
+                
                 # 保存模型汇总
                 model_summary_file = self.save_model_summary(model)
                 
@@ -467,34 +460,133 @@ class SnkrDunkSpider:
                             page_data = json.load(f)
                             model_products.extend(page_data['products'])
                 
-                model_summary = {
+                # 为每个商品添加品牌和模型信息
+                for product in model_products:
+                    product_with_context = {
+                        'brand_id': brand_id,
+                        'brand_name': brand_name,
+                        'brand_localized_name': brand_localized_name,
+                        'model_id': model_id,
+                        'model_name': model_name,
+                        'model_localized_name': model_localized_name,
+                        **product  # 包含原有的商品信息
+                    }
+                    all_products.append(product_with_context)
+                
+                # 更新统计信息
+                model_product_count = len(model_products)
+                model_stats[f"{brand_name}/{model_name}"] = {
+                    'brand_id': brand_id,
+                    'brand_name': brand_name,
+                    'brand_localized_name': brand_localized_name,
+                    'model_id': model_id,
+                    'model_name': model_name,
+                    'model_localized_name': model_localized_name,
+                    'product_count': model_product_count,
+                    'page_files_count': len(model.get('page_files', []))
+                }
+                
+                brand_product_count += model_product_count
+                total_products += model_product_count
+            
+            # 品牌统计
+            brand_stats[brand_name] = {
+                'id': brand_id,
+                'name': brand_name,
+                'localized_name': brand_localized_name,
+                'model_count': len(brand['models']),
+                'product_count': brand_product_count
+            }
+        
+        # 生成products.json
+        products_file = os.path.join(self.result_dir, 'products.json')
+        with open(products_file, 'w', encoding='utf-8') as f:
+            json.dump(all_products, f, ensure_ascii=False, indent=2)
+        
+        # 生成categories.json（分类数据）
+        categories_data = {
+            'crawl_time': datetime.now().isoformat(),
+            'total_brands': len(brands_data),
+            'total_models': sum(len(brand['models']) for brand in brands_data),
+            'brands': []
+        }
+        
+        for brand in brands_data:
+            brand_info = {
+                'id': brand['id'],
+                'name': brand['name'],
+                'localized_name': brand['localized_name'],
+                'url': brand['url'],
+                'models': []
+            }
+            
+            for model in brand['models']:
+                model_info = {
                     'id': model['id'],
                     'name': model['name'],
                     'localized_name': model['localized_name'],
                     'url': model['url'],
-                    'products_url': model['products_url'],
-                    'total_products': len(model_products),
-                    'page_files_count': len(model.get('page_files', [])),
-                    'summary_file': model_summary_file
+                    'products_url': model['products_url']
                 }
-                
-                brand_summary['models'].append(model_summary)
-                consolidated_data['all_products'].extend(model_products)
-                total_products += len(model_products)
+                brand_info['models'].append(model_info)
             
-            consolidated_data['brands'].append(brand_summary)
+            categories_data['brands'].append(brand_info)
         
-        consolidated_data['summary']['total_products'] = total_products
+        categories_file = os.path.join(self.result_dir, 'categories.json')
+        with open(categories_file, 'w', encoding='utf-8') as f:
+            json.dump(categories_data, f, ensure_ascii=False, indent=2)
         
-        # 保存汇总数据
-        consolidated_file = os.path.join(self.result_dir, 'consolidated_data.json')
-        with open(consolidated_file, 'w', encoding='utf-8') as f:
-            json.dump(consolidated_data, f, ensure_ascii=False, indent=2)
+        # 生成summary.json
+        summary_data = {
+            'total_statistics': {
+                'total_brands': len(brands_data),
+                'total_models': sum(len(brand['models']) for brand in brands_data),
+                'total_products': total_products,
+                'total_page_files': len(all_page_files),
+                'crawl_time': datetime.now().isoformat()
+            },
+            'brand_statistics': brand_stats,
+            'model_statistics': model_stats,
+            'top_brands_by_products': sorted(
+                [(name, stats['product_count']) for name, stats in brand_stats.items()],
+                key=lambda x: x[1], reverse=True
+            )[:10],
+            'top_models_by_products': sorted(
+                [(name, stats['product_count']) for name, stats in model_stats.items()],
+                key=lambda x: x[1], reverse=True
+            )[:20]
+        }
         
-        logger.info(f"数据汇总完成，保存到: {consolidated_file}")
+        summary_file = os.path.join(self.result_dir, 'summary.json')
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"products.json 已保存: {products_file}")
+        logger.info(f"categories.json 已保存: {categories_file}")
+        logger.info(f"summary.json 已保存: {summary_file}")
         logger.info(f"总计: {total_products} 个商品，分布在 {len(all_page_files)} 个页面文件中")
         
-        return consolidated_data
+        # 输出统计信息
+        logger.info(f"\n=== 汇总统计信息 ===")
+        logger.info(f"品牌数量: {len(brand_stats)}")
+        logger.info(f"模型数量: {len(model_stats)}")
+        logger.info(f"商品总数: {total_products}")
+        
+        if brand_stats:
+            logger.info(f"\n商品数量最多的前5个品牌:")
+            for brand_name, product_count in summary_data['top_brands_by_products'][:5]:
+                logger.info(f"  {brand_name}: {product_count} 个商品")
+        
+        if model_stats:
+            logger.info(f"\n商品数量最多的前5个模型:")
+            for model_name, product_count in summary_data['top_models_by_products'][:5]:
+                logger.info(f"  {model_name}: {product_count} 个商品")
+        
+        return {
+            'products': all_products,
+            'categories': categories_data,
+            'summary': summary_data
+        }
     
     def crawl_all_products(self, brands_data, max_models_per_brand=None, max_concurrent_models=5):
         """爬取所有商品信息"""
