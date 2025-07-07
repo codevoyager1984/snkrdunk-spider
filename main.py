@@ -150,6 +150,9 @@ class SnkrDunkSpider:
                                 'id': model.get('id', ''),
                                 'name': model.get('name', ''),
                                 'localized_name': model.get('localizedName', ''),
+                                'brand_id': brand_id,
+                                'brand_name': brand.get('name', ''),
+                                'brand_localized_name': brand.get('localizedName', ''),
                                 'url': f"{self.base_url}/products?brand={brand_id}&model={model.get('id', '')}",
                                 'products_url': f"{self.base_url}/models/{model.get('id', '')}/products?order=release",
                                 'products': [],
@@ -194,14 +197,11 @@ class SnkrDunkSpider:
             # 如果没找到，尝试其他可能的选择器
             product_items = soup.find_all('li', {'class': lambda x: x and 'item' in ' '.join(x)})
         
-        print(f"    在页面中找到 {len(product_items)} 个商品项目")
-        
         for i, item in enumerate(product_items):
             try:
                 # 查找商品链接
                 product_link = item.find('a', class_='item-block') or item.find('a')
                 if not product_link:
-                    print(f"      商品 {i+1}: 未找到商品链接")
                     continue
                 
                 # 提取商品名称
@@ -277,16 +277,10 @@ class SnkrDunkSpider:
                 }
                 
                 products.append(product_info)
-                
-                # 打印前几个商品的信息用于调试
-                if i < 3:
-                    print(f"      商品 {i+1}: {product_name[:30]}... - {price_text[:20]}...")
                     
             except Exception as e:
-                print(f"      商品 {i+1} 解析失败: {e}")
                 continue
         
-        print(f"    成功解析 {len(products)} 个商品")
         return products
     
     def extract_pagination_info(self, html_content):
@@ -347,7 +341,7 @@ class SnkrDunkSpider:
         # 获取第一页来获取分页信息
         first_page_html = self.get_page(products_url, max_retries=3, timeout=20, retry_delay=2)
         if not first_page_html:
-            logger.info(f"无法获取模型 {model_id} 的商品页面")
+            logger.error(f"无法获取模型 {model_id} 的商品页面")
             return []
         
         # 提取分页信息
@@ -359,9 +353,11 @@ class SnkrDunkSpider:
         
         # 提取第一页的商品并保存
         first_page_products = self.extract_products_from_page(first_page_html, products_url)
-        logger.info(f"  模型 {model_id} 第一页商品数量: {len(first_page_products)}")
         page_file_1 = self.save_page_data(model_id, 1, first_page_products, products_url)
         page_files = [page_file_1]
+        
+        # 打印第一页解析信息
+        logger.info(f"  品牌: {model_info['brand_name']} ({model_info['brand_localized_name']}) | 模型: {model_info['name']} ({model_info['localized_name']}) | URL: {products_url} | 商品数: {len(first_page_products)}")
         
         all_products = first_page_products.copy()
         
@@ -372,14 +368,13 @@ class SnkrDunkSpider:
                 
                 for page in range(2, total_pages + 1):
                     page_url = f"{products_url}&page={page}"
-                    future = executor.submit(self.crawl_single_page, model_id, page_url, page)
+                    future = executor.submit(self.crawl_single_page, model_info, page_url, page)
                     futures.append((future, page))
                 
                 # 收集所有页面的商品
                 for future, page_num in futures:
                     try:
                         page_products, page_file = future.result(timeout=30)
-                        logger.info(f"  模型 {model_id} 第 {page_num} 页商品数量: {len(page_products)}")
                         if page_products:
                             all_products.extend(page_products)
                             page_files.append(page_file)
@@ -392,13 +387,16 @@ class SnkrDunkSpider:
         logger.info(f"  模型 {model_id} 实际获取到 {len(all_products)} 个商品，保存了 {len(page_files)} 个页面文件")
         return all_products
     
-    def crawl_single_page(self, model_id, page_url, page_number):
+    def crawl_single_page(self, model_info, page_url, page_number):
         """爬取单个页面的商品"""
-        logger.info(f"    正在获取第 {page_number} 页...")
         html_content = self.get_page(page_url, max_retries=2, timeout=20, retry_delay=3)
         if html_content:
             products = self.extract_products_from_page(html_content, page_url)
-            page_file = self.save_page_data(model_id, page_number, products, page_url)
+            page_file = self.save_page_data(model_info['id'], page_number, products, page_url)
+            
+            # 打印页面解析信息
+            logger.info(f"    品牌: {model_info['brand_name']} ({model_info['brand_localized_name']}) | 模型: {model_info['name']} ({model_info['localized_name']}) | 页面: {page_number} | URL: {page_url} | 商品数: {len(products)}")
+            
             return products, page_file
         return [], None
     
@@ -742,7 +740,7 @@ class SnkrDunkSpider:
                     result['brands'] = self.crawl_all_products(result['brands'], max_models_per_brand, max_concurrent)
                     
                     # 汇总数据
-                    consolidated_data = self.consolidate_data(result['brands'])
+                    self.consolidate_data(result['brands'])
                 
                 all_data.append(result)
                 
