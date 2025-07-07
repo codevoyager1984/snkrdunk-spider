@@ -25,6 +25,9 @@ class SnkrDunkSpider:
         
         self.product_concurrent_workers = 20
         self.model_concurrent_workers = 20
+        
+        # 记录商品数为0的模型
+        self.zero_product_models = []
 
     def setup_result_directory(self):
         """设置结果目录"""
@@ -381,6 +384,37 @@ class SnkrDunkSpider:
         # 更新模型信息
         model_info['page_files'] = page_files
         
+        # 记录商品数为0的模型（分页信息显示0但实际解析到商品的情况）
+        if pagination_info['total_count'] == 0 and len(all_products) > 0:
+            with self.lock:
+                self.zero_product_models.append({
+                    'brand_name': model_info['brand_name'],
+                    'brand_localized_name': model_info['brand_localized_name'],
+                    'model_name': model_info['name'],
+                    'model_localized_name': model_info['localized_name'],
+                    'model_id': model_id,
+                    'url': products_url,
+                    'pagination_total_count': pagination_info['total_count'],
+                    'actual_products_count': len(all_products),
+                    'total_pages': total_pages
+                })
+        
+        # 记录商品数为0的模型（真正没有商品的情况）
+        elif len(all_products) == 0:
+            with self.lock:
+                self.zero_product_models.append({
+                    'brand_name': model_info['brand_name'],
+                    'brand_localized_name': model_info['brand_localized_name'],
+                    'model_name': model_info['name'],
+                    'model_localized_name': model_info['localized_name'],
+                    'model_id': model_id,
+                    'url': products_url,
+                    'pagination_total_count': pagination_info['total_count'],
+                    'actual_products_count': len(all_products),
+                    'total_pages': total_pages,
+                    'no_products': True
+                })
+        
         return all_products
     
     def crawl_single_page(self, model_info, page_url, page_number):
@@ -555,9 +589,20 @@ class SnkrDunkSpider:
         with open(summary_file, 'w', encoding='utf-8') as f:
             json.dump(summary_data, f, ensure_ascii=False, indent=2)
         
+        # 保存商品数为0的模型记录
+        zero_products_file = os.path.join(self.result_dir, 'zero_products_models.json')
+        zero_products_data = {
+            'total_zero_models': len(self.zero_product_models),
+            'crawl_time': datetime.now().isoformat(),
+            'models': self.zero_product_models
+        }
+        with open(zero_products_file, 'w', encoding='utf-8') as f:
+            json.dump(zero_products_data, f, ensure_ascii=False, indent=2)
+        
         logger.info(f"products.json 已保存: {products_file}")
         logger.info(f"categories.json 已保存: {categories_file}")
         logger.info(f"summary.json 已保存: {summary_file}")
+        logger.info(f"zero_products_models.json 已保存: {zero_products_file}")
         logger.info(f"总计: {total_products} 个商品，分布在 {len(all_page_files)} 个页面文件中")
         
         # 输出统计信息
@@ -770,6 +815,28 @@ class SnkrDunkSpider:
             self.save_to_file(all_data, filename)
         
         logger.info(f"\n所有文件已保存到目录: {self.result_dir}")
+        
+        # 输出商品数为0的模型统计
+        if self.zero_product_models:
+            logger.info(f"\n=== 商品数为0的模型统计 ===")
+            logger.info(f"发现 {len(self.zero_product_models)} 个商品数为0的模型:")
+            
+            # 分类统计
+            truly_zero = [m for m in self.zero_product_models if m.get('no_products', False)]
+            discrepancy = [m for m in self.zero_product_models if not m.get('no_products', False)]
+            
+            if truly_zero:
+                logger.info(f"\n真正没有商品的模型 ({len(truly_zero)} 个):")
+                for model in truly_zero:
+                    logger.info(f"  - {model['brand_name']} | {model['model_name']} ({model['model_localized_name']}) | URL: {model['url']}")
+            
+            if discrepancy:
+                logger.info(f"\n分页信息显示0但实际有商品的模型 ({len(discrepancy)} 个):")
+                for model in discrepancy:
+                    logger.info(f"  - {model['brand_name']} | {model['model_name']} ({model['model_localized_name']}) | 分页显示: {model['pagination_total_count']} 实际: {model['actual_products_count']} | URL: {model['url']}")
+        else:
+            logger.info(f"\n=== 所有模型都有商品数据 ===")
+        
         return all_data
 
 if __name__ == "__main__":
