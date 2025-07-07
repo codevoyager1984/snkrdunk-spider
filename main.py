@@ -23,6 +23,9 @@ class SnkrDunkSpider:
         # 创建结果目录
         self.setup_result_directory()
         
+        self.product_concurrent_workers = 20
+        self.model_concurrent_workers = 20
+
     def setup_result_directory(self):
         """设置结果目录"""
         # 创建基础results目录
@@ -363,7 +366,7 @@ class SnkrDunkSpider:
         
         # 如果有多页，并发获取其他页面
         if total_pages > 1:
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            with ThreadPoolExecutor(max_workers=self.product_concurrent_workers) as executor:
                 futures = []
                 
                 for page in range(2, total_pages + 1):
@@ -586,7 +589,7 @@ class SnkrDunkSpider:
             'summary': summary_data
         }
     
-    def crawl_all_products(self, brands_data, max_models_per_brand=None, max_concurrent_models=5):
+    def crawl_all_products(self, brands_data):
         """爬取所有商品信息"""
         logger.info("开始爬取所有商品信息...")
         
@@ -596,22 +599,14 @@ class SnkrDunkSpider:
         
         logger.info(f"总共需要爬取 {len(brands_data)} 个品牌的 {total_models} 个模型")
         
-        if max_models_per_brand:
-            logger.info(f"限制每个品牌最多爬取 {max_models_per_brand} 个模型")
-        
-        logger.info(f"使用 {max_concurrent_models} 个并发线程处理模型")
-        
         for brand_idx, brand in enumerate(brands_data):
             logger.info(f"\n处理品牌 {brand_idx + 1}/{len(brands_data)}: {brand['name']} ({brand['localized_name']})")
             
             models_to_process = brand['models']
-            if max_models_per_brand:
-                models_to_process = models_to_process[:max_models_per_brand]
-            
             logger.info(f"  准备并发处理 {len(models_to_process)} 个模型...")
             
             # 使用线程池并发处理模型
-            with ThreadPoolExecutor(max_workers=max_concurrent_models) as executor:
+            with ThreadPoolExecutor(max_workers=self.model_concurrent_workers) as executor:
                 future_to_model = {}
                 
                 # 提交所有模型的爬取任务
@@ -709,7 +704,7 @@ class SnkrDunkSpider:
             'total_products': total_products
         }
     
-    def run(self, crawl_products=True, max_models_per_brand=None, specific_category=None):
+    def run(self, crawl_products=True, specific_category=None):
         """运行爬虫"""
         all_category_urls = {
             'sneaker': 'https://snkrdunk.com/departments/sneaker',
@@ -736,9 +731,7 @@ class SnkrDunkSpider:
                 # 如果需要爬取商品信息
                 if crawl_products:
                     # 根据模型数量调整并发数
-                    max_concurrent = 2 if max_models_per_brand and max_models_per_brand <= 3 else 3
-                    result['brands'] = self.crawl_all_products(result['brands'], max_models_per_brand, max_concurrent)
-                    
+                    result['brands'] = self.crawl_all_products(result['brands'])
                     # 汇总数据
                     self.consolidate_data(result['brands'])
                 
