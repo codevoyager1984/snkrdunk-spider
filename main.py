@@ -64,9 +64,9 @@ class SnkrDunkSpider:
         for attempt in range(max_retries + 1):
             try:
                 if attempt == 0:
-                    logger.info(f"正在请求: {url}")
+                    logger.debug(f"正在请求: {url}")
                 else:
-                    logger.info(f"重试请求: {url} (第 {attempt} 次重试)")
+                    logger.debug(f"重试请求: {url} (第 {attempt} 次重试)")
                 
                 response = self.session.get(url, timeout=timeout)
                 response.raise_for_status()
@@ -337,10 +337,7 @@ class SnkrDunkSpider:
     def crawl_model_products(self, model_info):
         """爬取某个模型的所有商品"""
         model_id = model_info['id']
-        products_url = model_info['products_url']
-        
-        logger.info(f"正在爬取模型 {model_info['name']} ({model_info['localized_name']}) 的商品...")
-        
+        products_url = model_info['products_url']        
         # 获取第一页来获取分页信息
         first_page_html = self.get_page(products_url, max_retries=3, timeout=20, retry_delay=2)
         if not first_page_html:
@@ -350,10 +347,7 @@ class SnkrDunkSpider:
         # 提取分页信息
         pagination_info = self.extract_pagination_info(first_page_html)
         total_pages = pagination_info['total_pages']
-        total_count = pagination_info['total_count']
-        
-        logger.info(f"  模型 {model_id} 共有 {total_count} 个商品，{total_pages} 页")
-        
+                
         # 提取第一页的商品并保存
         first_page_products = self.extract_products_from_page(first_page_html, products_url)
         page_file_1 = self.save_page_data(model_id, 1, first_page_products, products_url)
@@ -387,7 +381,6 @@ class SnkrDunkSpider:
         # 更新模型信息
         model_info['page_files'] = page_files
         
-        logger.info(f"  模型 {model_id} 实际获取到 {len(all_products)} 个商品，保存了 {len(page_files)} 个页面文件")
         return all_products
     
     def crawl_single_page(self, model_info, page_url, page_number):
@@ -626,7 +619,7 @@ class SnkrDunkSpider:
                         model['page_files'] = page_files if page_files else []
                         
                         completed_count += 1
-                        logger.info(f"  完成模型 {completed_count}/{len(models_to_process)}: {model['name']}")
+                        # logger.info(f"  完成模型 {completed_count}/{len(models_to_process)}: {model['name']}")
                         
                     except Exception as e:
                         model = future_to_model[future]
